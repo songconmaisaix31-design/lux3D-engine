@@ -144,8 +144,12 @@ step('python scripts/check_numbers.py', [...py, 'scripts/check_numbers.py']);
 const tests = walk(ROOT).sort((a, b) => a.localeCompare(b));
 add('cmd', `$ node --test  # ${tests.length} files under examples/ + platforms/`);
 {
-  const { code, out } = run(process.execPath, ['--test', ...tests]);
-  const pick = (key) => (out.match(new RegExp(`ℹ\\s*${key}\\s+(\\d+)`)) || [, '?'])[1];
+  // --test-reporter=spec keeps the summary stable: node prints TAP when piped.
+  const { code, out } = run(process.execPath, ['--test', '--test-reporter=spec', ...tests]);
+  const pick = (key) => {
+    const m = out.match(new RegExp(`^[ℹ#]\\s*${key}\\s+(\\d+)`, 'm'));
+    return m ? m[1] : '?';
+  };
   const totals = ['tests', 'pass', 'fail', 'skipped'].map((k) => `${k} ${pick(k)}`);
   add(code === 0 ? 'pass' : 'fail', `ℹ ${totals.join('   ')}`);
   if (code !== 0) failures += 1;

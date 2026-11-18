@@ -40,6 +40,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install PyYAML · 装 PyYAML
+        run: python -m pip install --disable-pip-version-check pyyaml
+
       - name: Regenerate card from real output · 重画卡片
         run: node tools/make-demo.mjs
 
