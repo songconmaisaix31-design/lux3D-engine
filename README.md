@@ -102,6 +102,10 @@ Node 20+ and Python 3.10+ cover every check on this page. Rust 1.87+ is only nee
 
 Node 20+ 与 Python 3.10+ 足够跑通本页所有自检。Rust 1.87+ 只有跑引擎本体才需要；Windows 上还要装 MSVC 链接器。
 
+On Windows, check the tree out with LF endings (`git config core.autocrlf false` before the first checkout, or `git rm --cached -r . && git reset --hard` afterwards). One JS test matches LF-only source text and fails on a CRLF working tree — the repository currently fails that way on a default Windows clone.
+
+Windows 上要用 LF 检出（首次 checkout 前 `git config core.autocrlf false`，已克隆则 `git rm --cached -r . && git reset --hard`）。有一个 JS 测试按 LF 源码文本做匹配，CRLF 工作树会失败——默认 Windows 克隆现在就会踩到。
+
 ### 1. Open a demo · 打开一个 demo
 
 The demos are static pages: no install, no build. Open [the live demo](https://songconmaisaix31-design.github.io/3D-engine/) directly, or serve the repository yourself.
