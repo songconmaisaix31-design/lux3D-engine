@@ -179,9 +179,9 @@ PC 入口自底向上启动整条层栈，并打印每个系统的耗时表；�
 
 ## Status · 状态
 
-Snapshot of `OriEra-engine/engine@49d8592`, re-committed as an independent repository: version 0.13.0, 195 commits, 9 tags.
+Snapshot of `OriEra-engine/engine@49d8592` with its 195 upstream commits and 9 tags, re-committed as an independent repository: version 0.13.0.
 
-取自 `OriEra-engine/engine@49d8592` 的快照，作为独立仓库重新提交：版本 0.13.0，195 个提交，9 个 tag。
+取自 `OriEra-engine/engine@49d8592` 的快照，带 195 个上游提交与 9 个 tag，作为独立仓库重新提交：版本 0.13.0。
 
 Verified on this snapshot (Windows 11, Node 24.16.0, Python 3.13.13): the 130 JS tests pass, the manifest gate resolves 10 manifests / 49 contracts, the number guard agrees with 17 demos and 11 layers, and the static demo server answers 200. The Rust side was **not** built here — this machine has no MSVC linker; `.github/workflows/ci.yml` is where `cargo fmt / test / clippy` run.
 
