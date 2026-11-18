@@ -104,9 +104,9 @@ Node 20+ 与 Python 3.10+ 足够跑通本页所有自检。Rust 1.87+ 只有跑�
 
 ### 1. Open a demo · 打开一个 demo
 
-The demos are static pages: no install, no build. Open **https://songconmaisaix31-design.github.io/3D-engine/** directly, or serve the repository yourself.
+The demos are static pages: no install, no build. Open [the live demo](https://songconmaisaix31-design.github.io/3D-engine/) directly, or serve the repository yourself.
 
-demo 是静态页面，不用安装、不用构建。直接打开 **https://songconmaisaix31-design.github.io/3D-engine/**；或者在本地起服务。
+demo 是静态页面，不用安装、不用构建。直接打开[在线 demo](https://songconmaisaix31-design.github.io/3D-engine/)，或者在本地起服务。
 
 ```bash
 git clone https://github.com/songconmaisaix31-design/3D-engine.git
