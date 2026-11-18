@@ -208,4 +208,6 @@ ${body}
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, svg, 'utf8');
 console.log(`wrote ${relative(ROOT, OUT).split(sep).join('/')}  ${lines.length} lines, ${height}px tall`);
+console.log('--- card content / 卡片内容 ---');
+for (const line of lines) console.log(`${line.kind.padEnd(4)} ${line.text}`);
 if (failures > 0) process.exit(1);
