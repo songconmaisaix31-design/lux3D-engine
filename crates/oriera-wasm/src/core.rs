@@ -506,6 +506,15 @@ impl SimCore {
             rot: ee_frame.rot,
         };
         let fingers = r.gripper.as_ref().map(|g| {
+            if self.env.physics.contact_margin_m.is_some() {
+                let [left, right] = self.env.gripper_plate_poses().expect("scene has a gripper");
+                return serde_json::json!({
+                    "gap": self.gap(),
+                    "half": g.finger_half,
+                    "left": pose_json(&Pose {pos: left.pos, rot: left.rot}),
+                    "right": pose_json(&Pose {pos: right.pos, rot: right.rot}),
+                });
+            }
             // M0b plate frame: place the plates along the spec's
             // approach/gap axes (legacy +X/+Z when unset — those
             // normalize to the exact unit vectors, so the default

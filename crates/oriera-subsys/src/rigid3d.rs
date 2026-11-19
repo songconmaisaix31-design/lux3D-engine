@@ -364,6 +364,9 @@ pub struct PhysicsParams {
     pub contact_softness_hz: Option<f32>,
     /// Velocity warmstart blending (0..1).
     pub warmstart_coefficient: Option<f32>,
+    /// 接触安全边距（米）。启用后，夹爪驱动也使用此边距保护工作台和物体。
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub contact_margin_m: Option<f32>,
 }
 
 /// Static furniture built once at construction: a ground slab and an
@@ -806,6 +809,9 @@ pub fn sim_fingerprint(world: &World) -> u64 {
         h = mix(h, opt_u(pp.substeps.map(|v| v as u64)));
         h = mix(h, opt_f(pp.contact_softness_hz));
         h = mix(h, opt_f(pp.warmstart_coefficient));
+        if let Some(margin) = pp.contact_margin_m {
+            h = bits(h, margin);
+        }
     }
     // Gravity is part of the experiment identity too.
     h = bits(h, world.resource::<Gravity>().map_or(f32::NAN, |g| g.0));
@@ -1055,6 +1061,9 @@ pub struct MultibodySystem {
     /// Solver knobs (see [`PhysicsParams`]) — applied each tick,
     /// `None` fields keep rapier defaults.
     pub physics: PhysicsParams,
+    fixtures: Vec<FixtureSlab>,
+    applied_contact_margin: Option<f32>,
+    grasp_joint: Option<ImpulseJointHandle>,
     pipeline: PhysicsPipeline,
     islands: IslandManager,
     broad_phase: DefaultBroadPhase,
@@ -1166,6 +1175,9 @@ impl MultibodySystem {
         let mut sys = Self {
             robot,
             physics: PhysicsParams::default(),
+            fixtures: fixtures.to_vec(),
+            applied_contact_margin: None,
+            grasp_joint: None,
             pipeline: PhysicsPipeline::new(),
             islands: IslandManager::new(),
             broad_phase: DefaultBroadPhase::new(),
@@ -1630,11 +1642,148 @@ impl MultibodySystem {
             _ => Vec3::ZERO,
         };
         self.plate_prev_centre = Some(centre);
+        let direction = wr.mul_vec3(self.gap_vec);
         let side = wr.mul_vec3(self.gap_vec * (self.gap_now * 0.5));
-        for (h, sign) in [(fl, 1.0), (fr, -1.0)] {
+        let mut targets = [centre + side, centre - side];
+        if let Some(margin) = self.physics.contact_margin_m {
+            self.limit_plate_targets(&mut targets, wr, direction, Vec3::from_array(g.finger_half), margin);
+        }
+        for (h, target) in [(fl, targets[0]), (fr, targets[1])] {
             if let Some(b) = self.bodies.get_mut(h) {
                 b.set_next_kinematic_rotation(wr);
-                b.set_next_kinematic_translation(centre + sign * side);
+                b.set_next_kinematic_translation(target);
+            }
+        }
+    }
+
+    fn limit_plate_targets(
+        &self,
+        targets: &mut [Vec3; 2],
+        rotation: Rotation,
+        opening: Vec3,
+        half: Vec3,
+        margin: f32,
+    ) {
+        let radius = |half: Vec3, pose: Rotation, axis: Vec3| pose.inverse().mul_vec3(axis).abs().dot(half);
+        let plate_shape = rapier3d::parry::shape::Cuboid::new(half);
+        for (target, sign) in targets.iter_mut().zip([1.0, -1.0]) {
+            for body in self.map.values().filter_map(|h| self.bodies.get(*h)) {
+                let Some(collider) = body.colliders().first().and_then(|h| self.colliders.get(*h)) else {
+                    continue;
+                };
+                let Some(shape) = collider.shape().as_cuboid() else {
+                    continue;
+                };
+                let pose = Pose::from_parts(*target, rotation);
+                if matches!(rapier3d::parry::query::intersection_test(
+                    &pose, &plate_shape, body.position(), shape
+                ), Ok(result) if result.intersecting) {
+                    let edge = radius(half, rotation, opening)
+                        + radius(shape.half_extents, *body.rotation(), opening);
+                    let distance = sign * (*target - body.translation()).dot(opening);
+                    *target += opening * (sign * (edge - distance + margin * 0.1));
+                }
+            }
+        }
+
+        let extents = Vec3::new(
+            radius(half, rotation, Vec3::X), radius(half, rotation, Vec3::Y), radius(half, rotation, Vec3::Z),
+        );
+        let mut lift = 0.0f32;
+        for target in targets.iter() {
+            for fixture in &self.fixtures {
+                let center = Vec3::from_array(fixture.center);
+                let extent = Vec3::from_array(fixture.half);
+                let relative = (*target - center).abs();
+                if relative.x <= extent.x + extents.x && relative.z <= extent.z + extents.z {
+                    lift = lift.max(center.y + extent.y + margin - (target.y - extents.y));
+                }
+            }
+        }
+        for target in targets {
+            target.y += lift;
+        }
+    }
+
+    fn solve_contact_limits(&mut self, margin: f32) {
+        for handle in self.map.values() {
+            let Some(body) = self.bodies.get_mut(*handle) else { continue };
+            let Some(shape) = body.colliders().first()
+                .and_then(|h| self.colliders.get(*h))
+                .and_then(|c| c.shape().as_cuboid()) else { continue };
+            let p = body.translation();
+            let q = body.rotation().inverse();
+            let extent = |axis| q.mul_vec3(axis).abs().dot(shape.half_extents);
+            let mut lift = 0.0f32;
+            for slab in &self.fixtures {
+                let top = slab.center[1] + slab.half[1];
+                if p.y >= top
+                    && (p.x - slab.center[0]).abs() < slab.half[0] + extent(Vec3::X)
+                    && (p.z - slab.center[2]).abs() < slab.half[2] + extent(Vec3::Z)
+                {
+                    lift = lift.max(top + extent(Vec3::Y) + margin * 0.1 - p.y);
+                }
+            }
+            if lift > 0.0 {
+                body.set_translation(p + Vec3::Y * lift, true);
+                let mut velocity = body.linvel();
+                velocity.y = velocity.y.max(0.0);
+                body.set_linvel(velocity, true);
+            }
+        }
+
+        let Some((left, right)) = self.fingers else { return };
+        let Some(gripper) = self.robot.gripper.as_ref() else { return };
+        let left_body = &self.bodies[left];
+        let rotation = *left_body.rotation();
+        let opening = rotation.mul_vec3(self.gap_vec);
+        let mut targets = [left_body.translation(), self.bodies[right].translation()];
+        self.limit_plate_targets(
+            &mut targets, rotation, opening, Vec3::from_array(gripper.finger_half), margin,
+        );
+        for (handle, translation) in [(left, targets[0]), (right, targets[1])] {
+            let body = &mut self.bodies[handle];
+            if translation != body.translation() {
+                body.set_translation(translation, true);
+                body.set_next_kinematic_translation(translation);
+            }
+        }
+    }
+
+    /// 双侧夹持面靠拢后，由求解器模拟接触成立的刚性抓持。
+    fn update_contact_grasp(&mut self, demand: f32, margin: f32) {
+        if demand <= 0.5 {
+            if let Some(joint) = self.grasp_joint.take() {
+                self.impulse_joints.remove(joint, true);
+            }
+            return;
+        }
+        if self.grasp_joint.is_some_and(|joint| self.impulse_joints.get(joint).is_some()) {
+            return;
+        }
+        self.grasp_joint = None;
+        let Some((left, right)) = self.fingers else { return };
+        let Some(g) = self.robot.gripper.as_ref() else { return };
+        let opening = self.bodies[left].rotation().mul_vec3(self.gap_vec);
+        let plate = rapier3d::parry::shape::Cuboid::new(Vec3::from_array(g.finger_half));
+        for handle in self.map.values() {
+            let Some(cube) = self.bodies.get(*handle) else { continue };
+            let Some(shape) = cube.colliders().first()
+                .and_then(|h| self.colliders.get(*h))
+                .and_then(|c| c.shape().as_cuboid()) else { continue };
+            let bilateral = [(left, -1.0), (right, 1.0)].into_iter().all(|(handle, toward)| {
+                let jaw = &self.bodies[handle];
+                (cube.translation() - jaw.translation()).dot(opening) * toward > 0.0
+                    && matches!(rapier3d::parry::query::contact(
+                        jaw.position(), &plate, cube.position(), shape, margin * 2.0
+                    ), Ok(Some(hit)) if hit.normal1.dot(opening) * toward > 0.45)
+            });
+            if bilateral {
+                let wrist = &self.bodies[self.ee_body];
+                let relative = wrist.position().inverse() * *cube.position();
+                let joint = FixedJointBuilder::new().local_frame1(relative);
+                self.grasp_joint = Some(self.impulse_joints.insert(self.ee_body, *handle, joint, true));
+                break;
             }
         }
     }
@@ -1960,11 +2109,16 @@ impl MultibodySystem {
     /// World positions of the gripper plates `(left, right)`, or `None`
     /// without a gripper.
     pub fn plate_positions(&self) -> Option<[[f32; 3]; 2]> {
+        self.plate_poses().map(|poses| poses.map(|pose| pose.pos))
+    }
+
+    /// 双夹爪碰撞体在最后一次物理步后的位姿。
+    pub fn plate_poses(&self) -> Option<[Pose3; 2]> {
         let (fl, fr) = self.fingers?;
         let at = |h: RigidBodyHandle| {
             self.bodies.get(h).map(|b| {
                 let t = b.translation();
-                [t.x, t.y, t.z]
+                Pose3 { pos: [t.x, t.y, t.z], rot: quat_to_arr(*b.rotation()) }
             })
         };
         Some([at(fl)?, at(fr)?])
@@ -2128,7 +2282,10 @@ impl System<World> for MultibodySystem {
                     b = b.can_sleep(false);
                 }
                 let h = self.bodies.insert(b.build());
-                let c = prop_collider(shape, pp, groups);
+                let mut c = prop_collider(shape, pp, groups);
+                if let Some(margin) = self.physics.contact_margin_m {
+                    c.set_contact_skin(margin);
+                }
                 self.colliders.insert_with_parent(c, h, &mut self.bodies);
                 if let (Some(s), Some(a)) = (slides.get(k), anchor) {
                     if let Some(j) = self.attach_slide(a, h, *s) {
@@ -2224,7 +2381,17 @@ impl System<World> for MultibodySystem {
         }
 
         // 3.5 Drive gripper plates (kinematic) for THIS tick's step.
+        if self.applied_contact_margin != self.physics.contact_margin_m {
+            let margin = self.physics.contact_margin_m.unwrap_or(0.0);
+            for (_, collider) in self.colliders.iter_mut() {
+                collider.set_contact_skin(margin);
+            }
+            self.applied_contact_margin = self.physics.contact_margin_m;
+        }
         self.drive_fingers(gripper, dt);
+        if let Some(margin) = self.physics.contact_margin_m {
+            self.update_contact_grasp(gripper, margin);
+        }
 
         // 4. Step the pipeline — internal physics substeps per engine
         // tick (decimation; 3D worlds are y-up). The substep count is a
@@ -2247,6 +2414,9 @@ impl System<World> for MultibodySystem {
         if let Some(v) = p.warmstart_coefficient {
             params.warmstart_coefficient = v;
         }
+        if let Some(margin) = p.contact_margin_m {
+            params.normalized_allowed_linear_error = margin * 0.1;
+        }
         for _ in 0..substeps {
             self.pipeline.step(
                 gravity,
@@ -2263,6 +2433,10 @@ impl System<World> for MultibodySystem {
                 &(),
                 &(),
             );
+            if let Some(margin) = p.contact_margin_m {
+                self.solve_contact_limits(margin);
+                self.update_contact_grasp(gripper, margin);
+            }
         }
 
         // 5. End-effector pose from the attach body + grasp bookkeeping.
@@ -2274,7 +2448,11 @@ impl System<World> for MultibodySystem {
             ([t.x + off.x, t.y + off.y, t.z + off.z], quat_to_arr(q))
         };
         self.last_ee = (tip_pos, tip_rot);
-        self.update_holding(gripper);
+        if p.contact_margin_m.is_some() {
+            self.holding = self.grasp_joint.is_some();
+        } else {
+            self.update_holding(gripper);
+        }
 
         // 6. Write back: joint telemetry into the arm entity, prop
         // poses through a scratch table (one column pass, #100 style).
