@@ -98,13 +98,19 @@ The practical test of whether this is real: run `node tools/make-demo.mjs`. It r
 
 ### Requirements · 环境要求
 
-Node 20+ and Python 3.10+ cover every check on this page. Rust 1.87+ is only needed for the engine itself; on Windows that means an MSVC linker too.
+The JavaScript and documentation checks use Node 20+ and Python 3.10+. To build the engine, install Rust 1.87+ and the linker for your Rust toolchain. The Windows workbench guide uses the GNU toolchain and MinGW-w64.
 
-Node 20+ 与 Python 3.10+ 足够跑通本页所有自检。Rust 1.87+ 只有跑引擎本体才需要；Windows 上还要装 MSVC 链接器。
+JavaScript 和文档检查需要 Node 20+ 与 Python 3.10+。编译引擎需要 Rust 1.87+ 和对应工具链的链接器。Windows 工作台启动文档使用 GNU 工具链和 MinGW-w64。
 
-On Windows, check the tree out with LF endings (`git config core.autocrlf false` before the first checkout, or `git rm --cached -r . && git reset --hard` afterwards). One JS test matches LF-only source text and fails on a CRLF working tree — the repository currently fails that way on a default Windows clone.
+On Windows, use `git -c core.autocrlf=false clone ...` to preserve the repository's line endings for the JavaScript checks.
 
-Windows 上要用 LF 检出（首次 checkout 前 `git config core.autocrlf false`，已克隆则 `git rm --cached -r . && git reset --hard`）。有一个 JS 测试按 LF 源码文本做匹配，CRLF 工作树会失败——默认 Windows 克隆现在就会踩到。
+Windows 上克隆时使用 `git -c core.autocrlf=false clone ...`，以保留 JavaScript 检查所需的仓库换行格式。
+
+### Robot-arm workbench · 机械臂工作台
+
+For local training, independent evaluation and replay, build the collector and Python extension from this repository's `main`. The [workbench setup guide](https://github.com/songconmaisaix31-design/lux3d-embodied-bridge/blob/main/docs/WORKBENCH.md) includes the build command and a mahjong pick-and-place run.
+
+在本地运行训练、独立评估和回放时，从本仓库的 `main` 编译采集程序和 Python 扩展。[工作台启动说明](https://github.com/songconmaisaix31-design/lux3d-embodied-bridge/blob/main/docs/WORKBENCH.md)提供编译命令和麻将抓放步骤。
 
 ### 1. Open a demo · 打开一个 demo
 
@@ -164,7 +170,7 @@ PC 入口自底向上启动整条层栈，并打印每个系统的耗时表；�
 ## Repository layout · 仓库结构
 
 ```text
-3D-engine/
+lux3D-engine/
 ├── crates/            # L0–L9 in dependency order · 按依赖顺序的 L0–L9
 ├── platforms/         # pc, web, bci_reserved — only these exist today · 目前只有这三个
 ├── examples/          # 17 demos + _template · 17 个 demo 与模板
