@@ -204,7 +204,11 @@ impl SceneSpec {
     /// Structural + semantic validation: names the offending field and
     /// its legal values (G-7), never a silent default.
     pub fn validate(&self) -> Result<(), String> {
-        if self.physics.contact_margin_m.is_some_and(|margin| !margin.is_finite() || !(0.0001..=0.005).contains(&margin)) {
+        if self
+            .physics
+            .contact_margin_m
+            .is_some_and(|margin| !margin.is_finite() || !(0.0001..=0.005).contains(&margin))
+        {
             return Err("physics.contact_margin_m 须在 0.0001 至 0.005 米之间".into());
         }
         if self.schema != SCHEMA_V2 {

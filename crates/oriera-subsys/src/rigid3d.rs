@@ -365,7 +365,10 @@ pub struct PhysicsParams {
     /// Velocity warmstart blending (0..1).
     pub warmstart_coefficient: Option<f32>,
     /// 接触安全边距（米）。启用后，夹爪驱动也使用此边距保护工作台和物体。
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub contact_margin_m: Option<f32>,
 }
 
@@ -1646,7 +1649,13 @@ impl MultibodySystem {
         let side = wr.mul_vec3(self.gap_vec * (self.gap_now * 0.5));
         let mut targets = [centre + side, centre - side];
         if let Some(margin) = self.physics.contact_margin_m {
-            self.limit_plate_targets(&mut targets, wr, direction, Vec3::from_array(g.finger_half), margin);
+            self.limit_plate_targets(
+                &mut targets,
+                wr,
+                direction,
+                Vec3::from_array(g.finger_half),
+                margin,
+            );
         }
         for (h, target) in [(fl, targets[0]), (fr, targets[1])] {
             if let Some(b) = self.bodies.get_mut(h) {
@@ -1664,11 +1673,16 @@ impl MultibodySystem {
         half: Vec3,
         margin: f32,
     ) {
-        let radius = |half: Vec3, pose: Rotation, axis: Vec3| pose.inverse().mul_vec3(axis).abs().dot(half);
+        let radius =
+            |half: Vec3, pose: Rotation, axis: Vec3| pose.inverse().mul_vec3(axis).abs().dot(half);
         let plate_shape = rapier3d::parry::shape::Cuboid::new(half);
         for (target, sign) in targets.iter_mut().zip([1.0, -1.0]) {
             for body in self.map.values().filter_map(|h| self.bodies.get(*h)) {
-                let Some(collider) = body.colliders().first().and_then(|h| self.colliders.get(*h)) else {
+                let Some(collider) = body
+                    .colliders()
+                    .first()
+                    .and_then(|h| self.colliders.get(*h))
+                else {
                     continue;
                 };
                 let Some(shape) = collider.shape().as_cuboid() else {
@@ -1677,7 +1691,8 @@ impl MultibodySystem {
                 let pose = Pose::from_parts(*target, rotation);
                 if matches!(rapier3d::parry::query::intersection_test(
                     &pose, &plate_shape, body.position(), shape
-                ), Ok(result) if result.intersecting) {
+                ), Ok(result) if result.intersecting)
+                {
                     let edge = radius(half, rotation, opening)
                         + radius(shape.half_extents, *body.rotation(), opening);
                     let distance = sign * (*target - body.translation()).dot(opening);
@@ -1687,7 +1702,9 @@ impl MultibodySystem {
         }
 
         let extents = Vec3::new(
-            radius(half, rotation, Vec3::X), radius(half, rotation, Vec3::Y), radius(half, rotation, Vec3::Z),
+            radius(half, rotation, Vec3::X),
+            radius(half, rotation, Vec3::Y),
+            radius(half, rotation, Vec3::Z),
         );
         let mut lift = 0.0f32;
         for target in targets.iter() {
@@ -1707,10 +1724,17 @@ impl MultibodySystem {
 
     fn solve_contact_limits(&mut self, margin: f32) {
         for handle in self.map.values() {
-            let Some(body) = self.bodies.get_mut(*handle) else { continue };
-            let Some(shape) = body.colliders().first()
+            let Some(body) = self.bodies.get_mut(*handle) else {
+                continue;
+            };
+            let Some(shape) = body
+                .colliders()
+                .first()
                 .and_then(|h| self.colliders.get(*h))
-                .and_then(|c| c.shape().as_cuboid()) else { continue };
+                .and_then(|c| c.shape().as_cuboid())
+            else {
+                continue;
+            };
             let p = body.translation();
             let q = body.rotation().inverse();
             let extent = |axis| q.mul_vec3(axis).abs().dot(shape.half_extents);
@@ -1732,14 +1756,22 @@ impl MultibodySystem {
             }
         }
 
-        let Some((left, right)) = self.fingers else { return };
-        let Some(gripper) = self.robot.gripper.as_ref() else { return };
+        let Some((left, right)) = self.fingers else {
+            return;
+        };
+        let Some(gripper) = self.robot.gripper.as_ref() else {
+            return;
+        };
         let left_body = &self.bodies[left];
         let rotation = *left_body.rotation();
         let opening = rotation.mul_vec3(self.gap_vec);
         let mut targets = [left_body.translation(), self.bodies[right].translation()];
         self.limit_plate_targets(
-            &mut targets, rotation, opening, Vec3::from_array(gripper.finger_half), margin,
+            &mut targets,
+            rotation,
+            opening,
+            Vec3::from_array(gripper.finger_half),
+            margin,
         );
         for (handle, translation) in [(left, targets[0]), (right, targets[1])] {
             let body = &mut self.bodies[handle];
@@ -1758,31 +1790,51 @@ impl MultibodySystem {
             }
             return;
         }
-        if self.grasp_joint.is_some_and(|joint| self.impulse_joints.get(joint).is_some()) {
+        if self
+            .grasp_joint
+            .is_some_and(|joint| self.impulse_joints.get(joint).is_some())
+        {
             return;
         }
         self.grasp_joint = None;
-        let Some((left, right)) = self.fingers else { return };
-        let Some(g) = self.robot.gripper.as_ref() else { return };
+        let Some((left, right)) = self.fingers else {
+            return;
+        };
+        let Some(g) = self.robot.gripper.as_ref() else {
+            return;
+        };
         let opening = self.bodies[left].rotation().mul_vec3(self.gap_vec);
         let plate = rapier3d::parry::shape::Cuboid::new(Vec3::from_array(g.finger_half));
         for handle in self.map.values() {
-            let Some(cube) = self.bodies.get(*handle) else { continue };
-            let Some(shape) = cube.colliders().first()
+            let Some(cube) = self.bodies.get(*handle) else {
+                continue;
+            };
+            let Some(shape) = cube
+                .colliders()
+                .first()
                 .and_then(|h| self.colliders.get(*h))
-                .and_then(|c| c.shape().as_cuboid()) else { continue };
-            let bilateral = [(left, -1.0), (right, 1.0)].into_iter().all(|(handle, toward)| {
-                let jaw = &self.bodies[handle];
-                (cube.translation() - jaw.translation()).dot(opening) * toward > 0.0
-                    && matches!(rapier3d::parry::query::contact(
+                .and_then(|c| c.shape().as_cuboid())
+            else {
+                continue;
+            };
+            let bilateral = [(left, -1.0), (right, 1.0)]
+                .into_iter()
+                .all(|(handle, toward)| {
+                    let jaw = &self.bodies[handle];
+                    (cube.translation() - jaw.translation()).dot(opening) * toward > 0.0
+                        && matches!(rapier3d::parry::query::contact(
                         jaw.position(), &plate, cube.position(), shape, margin * 2.0
                     ), Ok(Some(hit)) if hit.normal1.dot(opening) * toward > 0.45)
-            });
+                });
             if bilateral {
                 let wrist = &self.bodies[self.ee_body];
                 let relative = wrist.position().inverse() * *cube.position();
                 let joint = FixedJointBuilder::new().local_frame1(relative);
-                self.grasp_joint = Some(self.impulse_joints.insert(self.ee_body, *handle, joint, true));
+                self.grasp_joint =
+                    Some(
+                        self.impulse_joints
+                            .insert(self.ee_body, *handle, joint, true),
+                    );
                 break;
             }
         }
@@ -2118,7 +2170,10 @@ impl MultibodySystem {
         let at = |h: RigidBodyHandle| {
             self.bodies.get(h).map(|b| {
                 let t = b.translation();
-                Pose3 { pos: [t.x, t.y, t.z], rot: quat_to_arr(*b.rotation()) }
+                Pose3 {
+                    pos: [t.x, t.y, t.z],
+                    rot: quat_to_arr(*b.rotation()),
+                }
             })
         };
         Some([at(fl)?, at(fr)?])
