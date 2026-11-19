@@ -8,7 +8,7 @@ edition = "2021"
 # raw-dylib 依赖树——等价 `wasm-bindgen --target web --typescript`。
 # 用法：wbg-driver <input.wasm> <out-dir> [--out-name N]
 [dependencies]
-wasm-bindgen-cli-support = "=0.2.129"  # schema 必须与 workspace wasm-bindgen 同版
+wasm-bindgen-cli-support = "=0.2.130"  # schema 必须与 workspace wasm-bindgen 同版
 anyhow = "1"
 
 [[bin]]

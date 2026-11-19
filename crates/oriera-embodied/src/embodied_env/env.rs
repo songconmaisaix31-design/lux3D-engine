@@ -997,6 +997,7 @@ impl EmbodiedEnv for TableTopEnv {
             &self.scene.to_fixture_slabs(),
         )
         .unwrap_or_else(|e| panic!("reset：robot 构建失败：{e}"));
+        self.sys.physics = self.physics;
 
         // Settle: let the cube land and the chain stabilize, so every
         // episode starts from the same resting posture.
@@ -1219,6 +1220,11 @@ impl TableTopEnv {
             .get(i)
             .and_then(|e| self.world.get::<Pose3>(*e))
             .copied()
+    }
+
+    /// 夹爪碰撞体在求解器中的实际位姿。
+    pub fn gripper_plate_poses(&self) -> Option<[Pose3; 2]> {
+        self.sys.plate_poses()
     }
 
     /// 场景 prop 总数（含任务对象）。

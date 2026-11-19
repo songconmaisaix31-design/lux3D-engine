@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "oriera-sim"
 version = "0.13.0"
-description = "OriEra embodied simulation Gymnasium bridge (PyO3)"
+description = "lux3D-engine embodied simulation Gymnasium bridge (PyO3)"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 
