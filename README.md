@@ -1,6 +1,6 @@
 <div align="center">
 
-# OriEra · 3D-engine
+# lux3D-engine
 
 An AI-native 3D world runtime with eleven layers, a deterministic embodied bench, and degradation you can see — never a silent fallback.
 
