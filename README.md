@@ -7,11 +7,11 @@ An AI-native 3D world runtime with eleven layers, a deterministic embodied bench
 一个 AI 原生的 3D 世界运行时：十一层内核、一个确定性具身台；降级必须可见，不许静默兜底。
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/songconmaisaix31-design/3D-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/songconmaisaix31-design/3D-engine/actions/workflows/ci.yml)
+[![CI](https://github.com/songconmaisaix31-design/lux3D-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/songconmaisaix31-design/lux3D-engine/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.13.0-informational.svg)](Cargo.toml)
 [![MSRV](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](rust-toolchain.toml)
 [![GPU](https://img.shields.io/badge/embodied%20bench-CPU%20only-brightgreen.svg)](docs/POSITIONING.md)
-[![Live demos](https://img.shields.io/badge/demos-live-ff7a3d.svg)](https://songconmaisaix31-design.github.io/3D-engine/)
+[![Live demos](https://img.shields.io/badge/demos-live-ff7a3d.svg)](https://songconmaisaix31-design.github.io/lux3D-engine/)
 
 <img src="assets/demo/verify.svg" width="880" alt="Terminal card: manifest gate passes with 10 manifests and 49 contracts, the doc number guard passes with 17 demos and 11 layers, 130 JS tests pass" />
 
@@ -108,13 +108,13 @@ Windows 上要用 LF 检出（首次 checkout 前 `git config core.autocrlf fals
 
 ### 1. Open a demo · 打开一个 demo
 
-The demos are static pages: no install, no build. Open [the live demo](https://songconmaisaix31-design.github.io/3D-engine/) directly, or serve the repository yourself.
+The demos are static pages: no install, no build. Open [the live demo](https://songconmaisaix31-design.github.io/lux3D-engine/) directly, or serve the repository yourself.
 
-demo 是静态页面，不用安装、不用构建。直接打开[在线 demo](https://songconmaisaix31-design.github.io/3D-engine/)，或者在本地起服务。
+demo 是静态页面，不用安装、不用构建。直接打开[在线 demo](https://songconmaisaix31-design.github.io/lux3D-engine/)，或者在本地起服务。
 
 ```bash
-git clone https://github.com/songconmaisaix31-design/3D-engine.git
-cd 3D-engine
+git clone https://github.com/songconmaisaix31-design/lux3D-engine.git
+cd lux3D-engine
 python -m http.server 8124 -d examples
 ```
 
