@@ -112,6 +112,13 @@ For local training, independent evaluation and replay, build the collector and P
 
 在本地运行训练、独立评估和回放时，从本仓库的 `main` 编译采集程序和 Python 扩展。[工作台启动说明](https://github.com/songconmaisaix31-design/lux3d-embodied-bridge/blob/main/docs/WORKBENCH.md)提供编译命令和麻将抓放步骤。
 
+### Local embodied lab · 本地具身智能实验台
+
+Connect an MCP-capable agent to configure and run crop pick-and-place experiments and open the recorded 3D replays.
+
+让支持 MCP 的 Agent 选择机械臂、作物和重量，运行抓放对照实验，并打开实际运行的 3D 回放。
+[Local setup · 本地启动](tools/embodied-lab/README.md)
+
 ### 1. Open a demo · 打开一个 demo
 
 The demos are static pages: no install, no build. Open [the live demo](https://songconmaisaix31-design.github.io/lux3D-engine/) directly, or serve the repository yourself.

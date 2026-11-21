@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="icon" href="data:," />
     <title>具身仿真台 · 七预设卡片墙 — lux3D-engine</title>
 <script type="importmap">
 {
@@ -72,6 +73,7 @@
   <button id="btn-policy">▶ 脚本策略演示（IK 抓放）</button>
   <button id="btn-rec" class="rec">● 开始录制</button>
   <button id="btn-export">⤓ 导出 episode → Studio</button>
+  <button id="btn-replay" hidden>从头播放</button>
   <div id="hud">初始化中…</div>
 </div>
 <div id="presets" role="listbox" aria-label="官方预设卡片墙"></div>
@@ -93,7 +95,36 @@
 </div>
 <script type="module">
   import { boot } from "./engine/kernel.js";
-  boot(document.getElementById("viewport"));
+  async function openSimulator() {
+    const viewport = document.getElementById("viewport");
+    const replayId = new URLSearchParams(location.search).get("replay");
+    if (!replayId) return boot(viewport);
+    if (!/^[0-9a-f-]{36}$/.test(replayId)) throw new Error("回放编号无效");
+    const response = await fetch(`/out/embodied-lab/${replayId}.json`);
+    if (!response.ok) throw new Error(`无法读取实验回放（${response.status}）`);
+    const replay = await response.json();
+    const run = replay.summary;
+    document.title = "具身智能实验台（暂定） · 实验回放";
+    document.querySelector("header h1").textContent = document.title;
+    document.querySelector("header h1").nextElementSibling.textContent =
+      "拖动查看机械臂和作物的实际运动，点击「从头播放」重看。";
+    document.querySelector("header .tag").style.display = "none";
+    document.getElementById("presets").style.display = "none";
+    for (const id of ["btn-reset", "btn-policy", "btn-rec", "btn-export"]) {
+      document.getElementById(id).style.display = "none";
+    }
+    document.getElementById("btn-replay").hidden = false;
+    document.getElementById("side").style.display = "none";
+    document.getElementById("main").style.gridTemplateColumns = "minmax(0, 1fr)";
+    await boot(viewport, replay);
+    document.getElementById("hud").textContent =
+      `${run.robotName} · ${run.cropName} ${run.massGrams} g · 目标 ${run.target} · ${run.success ? "放置成功" : "未完成"} · ${run.simulatedSeconds} 秒`;
+  }
+  openSimulator().catch((error) => {
+    const message = document.querySelector("#load .msg");
+    if (message) message.textContent = error.message;
+    throw error;
+  });
 
   // ── 预设卡片墙（P1-B2，PLAN-embodied-v3 P1 #15）──────────────────
   // 七预设 = crates/oriera-embodied/specs/official/ 的现行七份（drawer 卡 =

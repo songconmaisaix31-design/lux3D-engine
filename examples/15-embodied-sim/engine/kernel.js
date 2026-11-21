@@ -405,6 +405,54 @@ function dlsSolve(spec, st, target, down, gapAxis) {
   return posErr;
 }
 
+export function createNaxisPickState(spec, geom) {
+  return {
+    phases: heavyPhases(geom),
+    sag: [0, 0, 0], pin: null, prevCmd: null, q: spec.robot.home.slice(),
+    lastErr: 0,
+  };
+}
+
+export function fourAxisPickAction(arm, obs, { ee, obj, goal }, step) {
+  const world = (offset) => [0, 1, 2].map((axis) => obs[ee + axis] + obs[offset + axis]);
+  const objectPosition = world(obj);
+  const goalPosition = world(goal);
+  const phase = PHASES[policyTick(PHASES, step)];
+  return phase
+    ? [...ik(arm, phase.target(objectPosition, goalPosition)), phase.grip]
+    : [...ik(arm, above(goalPosition, 0.22)), 0];
+}
+
+export function naxisPickAction(spec, na, obs, { ee, obj, goal }, step) {
+  const endEffector = [obs[ee], obs[ee + 1], obs[ee + 2]];
+  const world = (offset) => endEffector.map((v, axis) => v + obs[offset + axis]);
+  const objectPosition = world(obj);
+  const goalPosition = world(goal);
+  const phaseIndex = policyTick(na.phases, step);
+  const phase = na.phases[phaseIndex];
+  let raw = phase ? phase.target(objectPosition, goalPosition) : above(goalPosition, 0.22);
+
+  // 夹持阶段固定目标，避免夹爪随物体的轻微偏移反复追踪。
+  if (phase?.pin) {
+    na.pin ??= objectPosition.slice();
+    raw = na.pin.map((v, i) => v + (raw[i] - objectPosition[i]));
+  } else na.pin = null;
+
+  const hoverEnd = na.phases[0].ticks - 1;
+  if (step === hoverEnd) na.sag = raw.map((v, i) => v - endEffector[i]);
+  if (phaseIndex === 1 && step === hoverEnd + na.phases[1].ticks) {
+    na.sag = raw.map((v, i) => v + na.sag[i] - endEffector[i]);
+  }
+  const target = step > hoverEnd ? raw.map((v, i) => v + na.sag[i]) : raw;
+  if (step > 0 && na.lastErr > 0.02) na.q = obs.slice(0, spec.robot.joints.length);
+  na.lastErr = dlsSolve(spec, na, target, [0, -1, 0], [0, 0, 1]);
+  const limited = na.q.map((v, i) => na.prevCmd
+    ? na.prevCmd[i] + Math.min(Math.max(v - na.prevCmd[i], -0.028), 0.028)
+    : v);
+  na.prevCmd = limited;
+  return [...limited, phase?.grip ?? 0];
+}
+
 // ── 内核状态 ─
 const K = {
   sim: null, spec: null, layout: null, dof: 0, arm: null,
@@ -465,8 +513,7 @@ function envReset(seed) {
 }
 
 // ── 三维表现同步：渲染器只搬 mesh，不推演任何物理 ─
-function syncVisuals() {
-  const p = JSON.parse(K.sim.poses());
+function syncVisuals(p = JSON.parse(K.sim.poses())) {
   K.tick = p.tick;
   K.steps = p.steps;
   K.holding = p.holding;
@@ -660,7 +707,7 @@ function buildSceneFromSpec(scene) {
   scene.add(robot);
 }
 
-export async function boot(viewport) {
+export async function boot(viewport, replay = null) {
   const stage = (t) => { const el = document.getElementById("load"); if (el) el.firstElementChild.textContent = "启动: " + t; };
   stage("renderer");
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -751,10 +798,11 @@ export async function boot(viewport) {
 
   // ── wasm 物理内核（与 CLI/Python 同一份 TableTopEnv）──
   stage("wasm init");
-  await init(new URL("../vendor/oriera/oriera_wasm_bg.wasm", import.meta.url));
+  await init({ module_or_path: new URL("../vendor/oriera/oriera_wasm_bg.wasm", import.meta.url) });
   stage("spec");
   const specUrl = new URLSearchParams(location.search).get("spec");
-  const specText = specUrl ? await (await fetch(specUrl)).text() : OrieraSim.preset_spec_json();
+  const specText = replay ? JSON.stringify(replay.scene)
+    : specUrl ? await (await fetch(specUrl)).text() : OrieraSim.preset_spec_json();
   try { applySpec(specText); } catch (e) { stage("ERR: " + (e && e.message ? e.message : e)); throw e; }
   // 任务面板跟 spec：仅 ?spec= 显式换装时渲染（默认桌面卡不触碰——
   // index.html 硬编码文案原样保留，渲染零变化）。面板元素可能不存在
@@ -764,7 +812,7 @@ export async function boot(viewport) {
   K.policySource = new URLSearchParams(location.search).get("policy") === "wasm" ? "wasm" : "js";
   buildSceneFromSpec(scene);
   stage("world");
-  try { envReset(1000); } catch (e) { stage("ERR: " + (e && e.message ? e.message : e)); throw e; }
+  try { envReset(replay?.summary.seed ?? 1000); } catch (e) { stage("ERR: " + (e && e.message ? e.message : e)); throw e; }
   document.getElementById("load").remove();
 
   // 相机拖拽
@@ -883,11 +931,7 @@ export async function boot(viewport) {
     if (K.dof !== 4) {
       // N 轴 DLS 演示：heavy 排程 + 标定/钉住/限幅状态（与 baseline 调参
       // 同形；q 热启动从家位开始，一集一清）。
-      K.naxis = {
-        phases: heavyPhases(K.phaseGeom),
-        sag: [0, 0, 0], pin: null, prevCmd: null, q: K.spec.robot.home.slice(),
-        lastErr: 0,
-      };
+      K.naxis = createNaxisPickState(K.spec, K.phaseGeom);
     } else K.naxis = null;
   };
   // drawer 的运行/收尾日志（「显示任务成功」：成功与超时都明说拉出量与判据）。
@@ -1003,7 +1047,8 @@ export async function boot(viewport) {
   });
 
   let rewardAvg = 0, successCount = 0, episodesRun = 0;
-  function loop() {
+  const pickIndices = () => ({ ee: K.iEe, obj: K.iObj, goal: K.iGoal });
+  function advanceLive() {
     let action = null;
     for (const k of K.keys) {
       const m = keyMap[k];
@@ -1029,61 +1074,9 @@ export async function boot(viewport) {
         action = Array.from(K.sim.baseline_action(K.policyStep));
         K.policyStep++;
       } else if (K.naxis) {
-        // N 轴 DLS 演示策略（P1-B2）：heavy 排程 + 悬停沉降标定/沉降末
-        // 重标定/闭爪目标钉住/关节限幅，与 embodied_sim_baseline 的
-        // policy() 同形（f64 演示口径，不逐位对标 Rust）。
-        const na = K.naxis;
-        const obs = K.sim.obs();
-        const ee = [obs[K.iEe], obs[K.iEe + 1], obs[K.iEe + 2]];
-        const obj = [ee[0] + obs[K.iObj], ee[1] + obs[K.iObj + 1], ee[2] + obs[K.iObj + 2]];
-        const gol = [ee[0] + obs[K.iGoal], ee[1] + obs[K.iGoal + 1], ee[2] + obs[K.iGoal + 2]];
-        const ph = policyTick(na.phases, K.policyStep);
-        const phase = ph >= 0 ? na.phases[ph] : null;
-        let raw = phase ? phase.target(obj, gol) : above(gol, 0.22);
-        const demand = phase ? phase.grip : 0;
-        let ticksBefore = 0;
-        for (let i = 0; i < (ph >= 0 ? ph : na.phases.length); i++) ticksBefore += na.phases[i].ticks;
-        // 闭爪/抬升锚：本段首 tick 钉住物体（含沉降段——它先于闭爪），
-        // obj 系目标整体平移到钉住的坐标系，随活物体漂移的正反馈回路断开。
-        if (phase?.pin) {
-          if (!na.pin) na.pin = obj.slice();
-          raw = [na.pin[0] + (raw[0] - obj[0]), na.pin[1] + (raw[1] - obj[1]), na.pin[2] + (raw[2] - obj[2])];
-        } else na.pin = null;
-        const hoverEnd = na.phases[0].ticks - 1;
-        const step = K.policyStep;
-        if (step === hoverEnd) na.sag = [raw[0] - ee[0], raw[1] - ee[1], raw[2] - ee[2]];
-        // 下探段末：臂已稳到抓取航点，把「指令−实测」稳态差折进补偿。
-        if (phase && na.phases[1] === phase && step === ticksBefore + phase.ticks - 1) {
-          const withSag = [raw[0] + na.sag[0], raw[1] + na.sag[1], raw[2] + na.sag[2]];
-          na.sag = [withSag[0] - ee[0], withSag[1] - ee[1], withSag[2] - ee[2]];
-        }
-        const target = step > hoverEnd
-          ? [raw[0] + na.sag[0], raw[1] + na.sag[1], raw[2] + na.sag[2]]
-          : raw;
-        // 失锁重锚：上一解离目标 >2 cm 时回到实测关节角（真实姿态总是
-        // 合法近邻种子）。
-        if (step > 0 && na.lastErr > 0.02) na.q = obs.slice(0, K.dof);
-        na.lastErr = dlsSolve(K.spec, na, target, [0, -1, 0], [0, 0, 1]);
-        const limited = [];
-        for (let i = 0; i < K.dof; i++) {
-          let v = na.q[i];
-          if (na.prevCmd) v = na.prevCmd[i] + Math.min(Math.max(v - na.prevCmd[i], -0.028), 0.028);
-          limited.push(v);
-        }
-        na.prevCmd = limited;
-        action = [...limited, demand];
-        K.policyStep++;
+        action = naxisPickAction(K.spec, K.naxis, K.sim.obs(), pickIndices(), K.policyStep++);
       } else {
-        // 渲染层策略（PHASES+ik 留在 JS，M1 工作包定案）：开环固定节拍，
-        // 与 Rust round-4 同形；观测由 wasm 出。
-        const obs = K.sim.obs();
-        const ee = [obs[K.iEe], obs[K.iEe + 1], obs[K.iEe + 2]];
-        const obj = [ee[0] + obs[K.iObj], ee[1] + obs[K.iObj + 1], ee[2] + obs[K.iObj + 2]];
-        const gol = [ee[0] + obs[K.iGoal], ee[1] + obs[K.iGoal + 1], ee[2] + obs[K.iGoal + 2]];
-        const ph = policyTick(PHASES, K.policyStep);
-        const phase = ph >= 0 ? PHASES[ph] : null;
-        action = phase ? [...ik(K.arm, phase.target(obj, gol)), phase.grip] : [...ik(K.arm, above(gol, 0.22)), 0];
-        K.policyStep++;
+        action = fourAxisPickAction(K.arm, K.sim.obs(), pickIndices(), K.policyStep++);
       }
       for (let i = 0; i < K.dof; i++) sliders[i].input.value = action[i];
     } else {
@@ -1154,6 +1147,16 @@ export async function boot(viewport) {
       }
     }
     syncVisuals();
+  }
+
+  let replayStartedAt = performance.now();
+  if (replay) document.getElementById("btn-replay").onclick = () => { replayStartedAt = performance.now(); };
+  function loop() {
+    if (replay) {
+      const elapsed = (performance.now() - replayStartedAt) / 1000;
+      const index = Math.min(Math.floor(elapsed / replay.frameSeconds), replay.frames.length - 1);
+      syncVisuals(replay.frames[index]);
+    } else advanceLive();
     // 目标圈呼吸脉冲 + EE 拖尾滚动
     const pulse = 1 + 0.06 * Math.sin(performance.now() * 0.003);
     K.visuals.goal.scale.set(pulse, pulse, 1);
@@ -1165,7 +1168,7 @@ export async function boot(viewport) {
       attr.needsUpdate = true;
     }
     const cp = K.visuals.cube.position;
-    K.hudCb?.(
+    if (!replay) K.hudCb?.(
       `tick ${K.tick} · r̄ ${rewardAvg.toFixed(3)} · 距目标 ${Math.hypot(cp.x - K.goal[0], cp.z - K.goal[2]).toFixed(3)}m` +
       `<br>成功 ${successCount}/${episodesRun} · ${K.holding ? "🤏 抓住" : "✋ 松开"} · obs ${K.layout.obs_dim} 维 / act ${K.layout.action_dim} 维` +
       `<br><small style="font-size:10px;color:#6f7690">演示内核与引擎基线口径不同，作业证据一律以 CLI eval_report 为准</small>`);
