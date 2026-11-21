@@ -46,7 +46,9 @@ export function mountReplay(replay) {
   } else {
     note.textContent = `目标 ${summary.target} · 最高抬升 ${summary.liftCm} 厘米`;
   }
-  if (summary.modelId) {
+  if (summary.modelId === "sweet-corn-detail") {
+    note.textContent += " · 精细玉米 GLB，明黄色尖端标记跟随碰撞体。";
+  } else if (summary.modelId) {
     note.textContent += corn ? " · GLB 用于外观，尖端标记跟随物理碰撞体。" : " · 回放外观使用 GLB。";
   }
   document.body.classList.add("show-replay");

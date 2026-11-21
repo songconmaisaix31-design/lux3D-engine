@@ -48,8 +48,25 @@ node tools/embodied-lab/cli.mjs inspect RUN_ID --at 12
 
 ## 文本生成三维外观
 
-给运行 MCP 的进程配置 `MESHY_API_KEY` 后，Agent 可以把物体的描述交给 `start_object_model`，用 `get_object_model` 查询任务。成功后返回 `modelId`，运行实验时把它放入 `baseline`。CLI 可用 `model-start --prompt` 和 `model-get TASK_ID` 执行同一操作。
+玉米入槽默认使用随仓库提供的精细模型 `sweet-corn-detail`。本地 GLB 和云端生成的 GLB 均使用现有的 Three.js 加载与回放路径。
 
-生成的 GLB 会贴合碰撞体的尺寸，用于回放外观。质量、碰撞和尖端判定取实验设置中的物理碰撞体。能够执行的动作由引擎已有的任务和控制策略决定。[Meshy 文本生成三维模型 API](https://docs.meshy.ai/en/api/text-to-3d)
+若需要重建本地资产，在安装 NumPy 和 Trimesh 4.8.3 的 Python 环境中，从仓库根目录运行 `python tools/embodied-lab/assets/build-corn-model.py tools/embodied-lab/assets/sweet-corn-detail.glb`。
+
+### 在 Windows 配置 Meshy
+
+在 Meshy 开发者平台打开 API Keys，选择 Create API Key。用 PowerShell 7 输入密钥，并为当前 Windows 用户保存。Meshy 创建 API 密钥需要支持 API 的套餐。[Meshy API Keys](https://www.meshy.ai/developers/keys) · [Meshy 鉴权说明](https://docs.meshy.ai/en/api/authentication)
+
+```powershell
+$env:MESHY_API_KEY = Read-Host 'Meshy API Key' -MaskInput
+[Environment]::SetEnvironmentVariable('MESHY_API_KEY', $env:MESHY_API_KEY, 'User')
+```
+
+从同一个 PowerShell 窗口启动 MCP 客户端，或者完全退出客户端后重新启动。用 `node tools/embodied-lab/cli.mjs list` 查看 `modeling.available`，此字段表示进程已读取密钥。
+
+> 我有一段约 75 克的甜玉米。用 Meshy 生成有独立籽粒和明确尖端的精细带纹理 GLB，然后把同一物体放进仿真。让机械臂抬过筐沿、转向、尖端朝左放进长槽。请微调并返回成功结果和带生成模型的回放。
+
+Agent 通过 `start_object_model` 生成预览网格，`get_object_model` 查询成功后，通过 `refine_object_model` 生成纹理。精修成功后查询并下载 GLB，将返回的 `modelId` 放入 `tune_corn_slot` 的 `baseline`。CLI 对应命令为 `model-start --detailed`、`model-get --status-only`、`model-refine`、`model-get` 和 `tune --model-id`。[Meshy 文本生成三维模型 API](https://docs.meshy.ai/en/api/text-to-3d)
+
+回放会把 GLB 缩放并挂到物体的实际位姿。质量、碰撞和尖端判定取实验设置中的物理碰撞体。
 
 后续扩展以现有场景规格和策略为入口。新增作物可从碰撞体和尺寸配置开始。新增机械臂可先使用引擎的 URDF 导入入口，再接入相应的抓放策略。新增任务应同时提供动作策略和成功判据。

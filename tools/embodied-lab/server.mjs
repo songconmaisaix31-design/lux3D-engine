@@ -2,10 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { changesSchema, experimentSchema, inspectRun, options, runExperiments, runIdSchema, tuneCornSlot } from "./experiments.mjs";
-import { modelAvailable, modelPromptSchema, modelTaskIdSchema, readModel, startModel } from "./model-assets.mjs";
+import { modelAvailable, modelPromptSchema, modelTaskIdSchema, readModel, refineModel, startModel } from "./model-assets.mjs";
 
 const server = new McpServer({ name: "embodied-lab", version: "0.2.0" }, {
-  instructions: "把用户一段话转成实验：识别物体、质量、动作和场景。普通抓放用 pick_place；玉米抬过筐沿并转向朝左入槽用 corn_slot。用户给的是估计重量时直接采用，并在结果中注明。用户要求自动微调时调用 tune_corn_slot。要求生成外观且建模服务可用时，先 start_object_model，再读 get_object_model，成功后传入 modelId。请明确列出所用配置、实际结果和回放链接。其他动作先说明当前支持范围。",
+  instructions: "把用户一段话转成实验，识别物体、估计质量、动作和场景。普通抓放用 pick_place；玉米越沿、转向朝左入槽用 corn_slot，默认有精细本地玉米外观。自动微调调用 tune_corn_slot。用户要求从文字通过 Meshy 生成新外观时，先 start_object_model，轮询 get_object_model 至成功。要求高精度带纹理外观时，预览用 detailed:true，查询预览用 download:false，再 refine_object_model 并查询精修任务。把最终 modelId 放入实验。若没有建模工具，明确说明 API 尚未配置。输出实际结果和回放链接。",
 });
 const toolResult = (data) => ({
   content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
@@ -38,14 +38,27 @@ if (modelAvailable()) {
   server.registerTool("start_object_model", {
     title: "提交物体的文本转 3D 外观任务",
     description: "调用 Meshy 生成物体的 GLB 外观。仅当用户要求生成外观时调用，之后用 get_object_model 查询。",
-    inputSchema: { prompt: modelPromptSchema.describe("仅描述单个物体外形，包含长度方向与尖端") },
-  }, async ({ prompt }) => toolResult(await startModel(prompt)));
+    inputSchema: {
+      prompt: modelPromptSchema.describe("仅描述单个物体外形，包含长度方向与尖端"),
+      detailed: z.boolean().optional().describe("4K 几何，适合精修后的高精度 GLB"),
+    },
+  }, async ({ prompt, detailed }) => toolResult(await startModel(prompt, detailed)));
+
+  server.registerTool("refine_object_model", {
+    title: "生成三维模型纹理",
+    description: "将已成功的 Meshy 预览任务提交精修，之后查询新任务以取得含纹理的 GLB。",
+    inputSchema: { previewTaskId: modelTaskIdSchema },
+  }, async ({ previewTaskId }) => toolResult(await refineModel(previewTaskId)));
 
   server.registerTool("get_object_model", {
     title: "查询 3D 建模任务并取得模型",
     description: "建模完成后下载 GLB 到本地，返回可传给实验的 modelId。建模进行中时返回状态。",
-    inputSchema: { taskId: modelTaskIdSchema },
-  }, async ({ taskId }) => toolResult(await readModel(taskId)));
+    inputSchema: {
+      taskId: modelTaskIdSchema,
+      download: z.boolean().optional().describe("只检查预览状态时可设为 false"),
+      waitSeconds: z.number().int().min(0).max(30).optional(),
+    },
+  }, async ({ taskId, download, waitSeconds }) => toolResult(await readModel(taskId, { download, waitSeconds })));
 }
 
 server.registerTool("inspect_run", {

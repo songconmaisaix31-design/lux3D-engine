@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { changesSchema, experimentSchema, inspectRun, options, runExperiments, tuneCornSlot } from "./experiments.mjs";
-import { modelPromptSchema, readModel, startModel } from "./model-assets.mjs";
+import { modelPromptSchema, readModel, refineModel, startModel } from "./model-assets.mjs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -13,6 +13,8 @@ const { values, positionals } = parseArgs({
     object: { type: "string" },
     "model-id": { type: "string" },
     prompt: { type: "string" },
+    detailed: { type: "boolean" },
+    "status-only": { type: "boolean" },
     "mass-grams": { type: "string" },
     target: { type: "string" },
     "tolerance-cm": { type: "string" },
@@ -26,16 +28,18 @@ const { values, positionals } = parseArgs({
 const [command, id] = positionals;
 const number = (value) => value === undefined ? undefined : Number(value);
 if (values.help || !command) {
-  console.log("用法：\n  node cli.mjs list\n  node cli.mjs run --task corn_slot [--mass-grams 75] [--scene JSON] [--strategy JSON] [--changes JSON] [--model-id ID]\n  node cli.mjs tune --task corn_slot\n  node cli.mjs inspect RUN_ID [--at 秒]\n  node cli.mjs model-start --prompt 描述\n  node cli.mjs model-get TASK_ID");
+  console.log("用法：\n  node cli.mjs list\n  node cli.mjs run --task corn_slot [--mass-grams 75] [--scene JSON] [--strategy JSON] [--changes JSON] [--model-id ID]\n  node cli.mjs tune --task corn_slot\n  node cli.mjs inspect RUN_ID [--at 秒]\n  node cli.mjs model-start --prompt 描述 [--detailed]\n  node cli.mjs model-refine PREVIEW_ID\n  node cli.mjs model-get TASK_ID [--status-only]");
 } else if (command === "list" && positionals.length === 1) {
   console.log(JSON.stringify(options, null, 2));
 } else if (command === "inspect" && positionals.length === 2) {
   const at = z.number().min(0).optional().parse(number(values.at));
   console.log(JSON.stringify(await inspectRun(id, at), null, 2));
 } else if (command === "model-start" && positionals.length === 1) {
-  console.log(JSON.stringify(await startModel(modelPromptSchema.parse(values.prompt)), null, 2));
+  console.log(JSON.stringify(await startModel(modelPromptSchema.parse(values.prompt), values.detailed), null, 2));
+} else if (command === "model-refine" && positionals.length === 2) {
+  console.log(JSON.stringify(await refineModel(id), null, 2));
 } else if (command === "model-get" && positionals.length === 2) {
-  console.log(JSON.stringify(await readModel(id), null, 2));
+  console.log(JSON.stringify(await readModel(id, { download: !values["status-only"] }), null, 2));
 } else if ((command === "run" || command === "tune") && positionals.length === 1) {
   const baseline = experimentSchema.parse({
     task: values.task,

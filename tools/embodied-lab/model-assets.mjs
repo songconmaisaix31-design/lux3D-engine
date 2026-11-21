@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { Writable } from "node:stream";
+import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
 
 export const modelsDir = new URL("../../out/embodied-lab-models/", import.meta.url);
-export const modelIdSchema = z.uuid();
+export const bundledModelsDir = new URL("./assets/", import.meta.url);
+export const detailedCornId = "sweet-corn-detail";
+export const modelIdSchema = z.union([z.literal(detailedCornId), z.uuid()]);
 export const modelPromptSchema = z.string().trim().min(1).max(800);
 export const modelTaskIdSchema = z.string().min(1).max(160);
 const endpoint = "https://api.meshy.ai/openapi/v2/text-to-3d";
@@ -28,20 +31,36 @@ export function modelAvailable() {
   return Boolean(process.env.MESHY_API_KEY);
 }
 
-export async function startModel(prompt) {
+export async function startModel(prompt, detailed = false) {
+  const geometry = detailed ? { geometry_resolution: "4k", target_polycount: 60000 } : { target_polycount: 20000 };
   const data = await meshy("", {
     method: "POST",
-    body: JSON.stringify({ mode: "preview", prompt, should_remesh: true, target_polycount: 20000, target_formats: ["glb"] }),
+    body: JSON.stringify({ mode: "preview", prompt, ai_model: "latest", should_remesh: true, ...geometry, target_formats: ["glb"] }),
   });
-  return { taskId: modelTaskIdSchema.parse(data.result), status: "PENDING" };
+  return { taskId: modelTaskIdSchema.parse(data.result), status: "PENDING", phase: "preview" };
 }
 
-export async function readModel(taskId) {
-  const data = await meshy("/" + encodeURIComponent(modelTaskIdSchema.parse(taskId)));
+export async function refineModel(previewTaskId) {
+  const data = await meshy("", {
+    method: "POST",
+    body: JSON.stringify({ mode: "refine", preview_task_id: modelTaskIdSchema.parse(previewTaskId), target_formats: ["glb"] }),
+  });
+  return { taskId: modelTaskIdSchema.parse(data.result), status: "PENDING", phase: "refine" };
+}
+
+export async function readModel(taskId, { download = true, waitSeconds = 0 } = {}) {
+  const path = "/" + encodeURIComponent(modelTaskIdSchema.parse(taskId));
+  const deadline = Date.now() + waitSeconds * 1000;
+  let data = await meshy(path);
+  while ((data.status === "PENDING" || data.status === "IN_PROGRESS") && Date.now() + 3000 < deadline) {
+    await setTimeout(3000);
+    data = await meshy(path);
+  }
   if (data.status === "FAILED" || data.status === "CANCELED" || data.status === "EXPIRED") {
     throw new Error(`Meshy 建模终止（${data.status}）`);
   }
-  if (data.status !== "SUCCEEDED") return { taskId, status: data.status, progress: data.progress };
+  const summary = { taskId, status: data.status, progress: data.progress, phase: data.type };
+  if (data.status !== "SUCCEEDED" || !download) return summary;
 
   const source = new URL(data.model_urls.glb);
   if (source.protocol !== "https:" || source.hostname !== "assets.meshy.ai" || source.port) {
@@ -63,9 +82,9 @@ export async function readModel(taskId) {
   const modelId = randomUUID();
   await mkdir(modelsDir, { recursive: true });
   await writeFile(new URL(`${modelId}.glb`, modelsDir), Buffer.concat(chunks), { flag: "wx" });
-  return { taskId, status: data.status, modelId };
+  return { ...summary, modelId };
 }
 
 export async function requireModel(id) {
-  await access(new URL(`${modelIdSchema.parse(id)}.glb`, modelsDir));
+  await access(new URL(`${modelIdSchema.parse(id)}.glb`, id === detailedCornId ? bundledModelsDir : modelsDir));
 }

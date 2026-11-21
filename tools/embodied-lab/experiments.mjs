@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { z } from "zod";
 import { gapForPhase, observeCornSlot, setupCornSlot } from "./corn-slot.mjs";
-import { modelAvailable, modelIdSchema, requireModel } from "./model-assets.mjs";
+import { detailedCornId, modelAvailable, modelIdSchema, requireModel } from "./model-assets.mjs";
 
 const simulator = new URL("../../examples/15-embodied-sim/", import.meta.url);
 const three = new URL("vendor/three.module.js", simulator).href;
@@ -51,7 +51,12 @@ export const options = {
   crops: Object.entries(crops).map(([id, { name, shape }]) => ({ id, name, shapeMeters: shape })),
   tasks: Object.entries(tasks).map(([id, task]) => ({ id, ...task })),
   targetZones: targets,
-  modeling: { provider: "Meshy", available: modelAvailable(), purpose: "GLB appearance; collider and mass use the experiment configuration" },
+  modeling: {
+    provider: "Meshy",
+    available: modelAvailable(),
+    localModels: [{ modelId: detailedCornId, name: "精细玉米模型" }],
+    purpose: "GLB 外观与碰撞体、质量分别配置",
+  },
 };
 const dimension = z.number().min(1).max(20);
 const objectSchema = z.object({
@@ -66,7 +71,7 @@ const settings = z.object({
   robot: z.enum(Object.keys(robots)).describe("机械臂：tabletop 桌面四轴臂，panda 七轴臂"),
   crop: z.enum(Object.keys(crops)).describe("作物：tomato 番茄，potato 马铃薯，corn 玉米段"),
   object: objectSchema,
-  modelId: modelIdSchema.describe("已生成并保存的 GLB 外观 ID"),
+  modelId: modelIdSchema.describe("GLB 外观，可指定本地 sweet-corn-detail 或 Meshy 返回的 modelId"),
   massGrams: z.number().positive().max(1000).describe("作物质量，单位克"),
   task: z.enum(Object.keys(tasks))
     .describe("pick_place 普通抓放；corn_slot 抬过筐沿后转向，尖端朝左放入长槽"),
@@ -155,6 +160,7 @@ function resolveSettings(input) {
     robot: input.robot ?? (corn ? "panda" : "tabletop"),
     crop: input.object ? undefined : input.crop ?? (corn ? "corn" : "tomato"),
     massGrams: input.massGrams ?? (corn ? 75 : 35),
+    modelId: input.modelId ?? (corn ? detailedCornId : undefined),
     target: corn ? "slot" : input.target ?? "A",
     toleranceCm: corn ? undefined : input.toleranceCm ?? 7,
     scene: { ...(corn ? entry.sceneDefaults : { tableHeightCm: 50 }), ...input.scene },

@@ -1254,7 +1254,7 @@ export async function boot(viewport, replay = null, replayFrame = null) {
 }
 
 async function attachReplayModel(id, cornSlot) {
-  if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("GLB 模型编号无效");
+  if (id !== "sweet-corn-detail" && !/^[0-9a-f-]{36}$/.test(id)) throw new Error("GLB 模型编号无效");
   const { GLTFLoader } = await import("/lab-loader/loaders/GLTFLoader.js");
   const modelUrl = new URL(`/out/embodied-lab-models/${id}.glb`, location.origin).href;
   const manager = new THREE.LoadingManager();
