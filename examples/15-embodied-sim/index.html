@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <link rel="icon" href="data:," />
+<link rel="stylesheet" href="./replay.css" />
     <title>具身仿真台 · 七预设卡片墙 — lux3D-engine</title>
 <script type="importmap">
 {
@@ -73,7 +74,6 @@
   <button id="btn-policy">▶ 脚本策略演示（IK 抓放）</button>
   <button id="btn-rec" class="rec">● 开始录制</button>
   <button id="btn-export">⤓ 导出 episode → Studio</button>
-  <button id="btn-replay" hidden>从头播放</button>
   <div id="hud">初始化中…</div>
 </div>
 <div id="presets" role="listbox" aria-label="官方预设卡片墙"></div>
@@ -93,8 +93,27 @@
     <div id="log">（尚未录制）</div>
   </div>
 </div>
+<template id="replay-template">
+  <section class="replay-controls" aria-label="回放控制">
+    <div class="replay-transport">
+      <button type="button" data-play>暂停</button>
+      <button type="button" data-restart>从头播放</button>
+      <input type="range" min="0" value="0" step="1" aria-label="回放进度" data-progress />
+      <output data-time></output>
+    </div>
+    <nav class="replay-phases" aria-label="实验阶段" data-phases></nav>
+  </section>
+  <section class="replay-summary" aria-label="实验结果">
+    <p class="replay-result" data-result></p>
+    <h2 data-task></h2>
+    <p class="replay-spec" data-spec></p>
+    <dl data-checks></dl>
+    <p class="replay-note" data-note></p>
+  </section>
+</template>
 <script type="module">
   import { boot } from "./engine/kernel.js";
+  import { mountReplay } from "./replay.js";
   async function openSimulator() {
     const viewport = document.getElementById("viewport");
     const replayId = new URLSearchParams(location.search).get("replay");
@@ -103,7 +122,6 @@
     const response = await fetch(`/out/embodied-lab/${replayId}.json`);
     if (!response.ok) throw new Error(`无法读取实验回放（${response.status}）`);
     const replay = await response.json();
-    const run = replay.summary;
     document.title = "具身智能实验台（暂定） · 实验回放";
     document.querySelector("header h1").textContent = document.title;
     document.querySelector("header h1").nextElementSibling.textContent =
@@ -113,12 +131,8 @@
     for (const id of ["btn-reset", "btn-policy", "btn-rec", "btn-export"]) {
       document.getElementById(id).style.display = "none";
     }
-    document.getElementById("btn-replay").hidden = false;
-    document.getElementById("side").style.display = "none";
-    document.getElementById("main").style.gridTemplateColumns = "minmax(0, 1fr)";
-    await boot(viewport, replay);
-    document.getElementById("hud").textContent =
-      `${run.robotName} · ${run.cropName} ${run.massGrams} g · 目标 ${run.target} · ${run.success ? "放置成功" : "未完成"} · ${run.simulatedSeconds} 秒`;
+    const getFrame = mountReplay(replay);
+    await boot(viewport, replay, getFrame);
   }
   openSimulator().catch((error) => {
     const message = document.querySelector("#load .msg");

@@ -1,6 +1,6 @@
 # 具身智能实验台（暂定）
 
-通过本地 Agent 运行农作物抓取实验。实验台复用 lux3D-engine 的四轴教学臂、七轴 Panda、WebAssembly 物理和抓放策略。
+通过自己的 Agent 描述物体、重量和要做的动作。实验台复用 lux3D-engine 的机械臂、WebAssembly 刚体物理、抓放控制和浏览器渲染。
 
 ## 本地启动
 
@@ -24,16 +24,32 @@ npm --prefix tools/embodied-lab run viewer
 }
 ```
 
-打开 Agent，发送一段自然语言指令。
+打开已经接入实验台的 Agent，发送一段自然语言指令。对于估计重量，Agent 可直接采用这个数值。
 
-> 我从没用过机械臂。请用桌面四轴臂把 35 克的番茄放到 A 区，再把重量改成 75 克。然后换成同重的玉米段，最后换成 Panda。每次只改一个条件，告诉我实验结果，并给我回放链接。
+> 有一段玉米，大概 75 克。请用机械臂把它抬过筐沿，再转向，尖端朝左放进长槽，松手后留在里面。微调动作，告诉我哪组完成了，给我回放链接。
 
-Agent 可以先调用 `list_experiment_options` 查看可用设置，再用 `run_experiments` 一次运行一到四组实验。用 `baseline` 设置第一轮，再用 `changes` 指定后续每轮相对上一轮要改的条件。回放服务只在本机监听，使用结果自带的链接即可观看。每次运行的轨迹保存到 `out/embodied-lab/`。
+Agent 可以调用 `list_experiment_options` 获取可用任务和默认配置。用 `run_experiments` 的 `baseline` 定义第一轮，以 `changes` 指定后续各轮相对上一轮改动的条件。用 `tune_corn_slot` 比较默认动作与抬升高度、转向时间、夹爪间距的变体。推荐结果必须完成夹持抬升、越过筐沿、尖端朝左并在松爪后稳定留在槽内。
 
-## 实验设置
+用 `inspect_run` 查看阶段时间或指定时刻的实际位姿。每轮都保存轨迹到 `out/embodied-lab/`，结果链接可以在本机打开。回放支持暂停、拖动进度、从头播放和按阶段跳转。
 
-- 机械臂可选桌面四轴臂和七轴 Panda。作物包括球形番茄、长方体代理的马铃薯、圆柱形玉米段。质量输入使用克，程序按碰撞体积换算物理引擎使用的密度。
-- 抓放实验可以指定 A 或 B 落区、落区容许半径以及随机种子。比较时使用相同的种子。一次成功需要抬升至少 3 厘米，并通过引擎的松爪后稳定放置判据。
-- 回放读取本次运行保存的实际位姿。抓取失败和超时也会生成回放。
+## CLI
+
+下面的命令与 Agent 走同一套仿真入口。
+
+```powershell
+node tools/embodied-lab/cli.mjs list
+node tools/embodied-lab/cli.mjs run --task corn_slot --mass-grams 75
+node tools/embodied-lab/cli.mjs tune --task corn_slot --mass-grams 75
+node tools/embodied-lab/cli.mjs run --task corn_slot --scene '{"slotWidthCm":7.5}' --changes '[{"scene":{"slotWidthCm":9}}]'
+node tools/embodied-lab/cli.mjs inspect RUN_ID --at 12
+```
+
+普通抓放支持桌面四轴臂、七轴 Panda、三种内置作物和自定义物体的球体、圆柱或长方体碰撞形状。玉米入槽使用七轴 Panda、带标记尖端的长形玉米碰撞体和固定初始位置。两种任务都能修改桌高。玉米任务还能修改筐沿高度、槽宽、抬升高度、转向用时和夹爪间距。约 75 克玉米的默认场景使用 4.5 厘米筐沿与 9 厘米槽宽。
+
+## 文本生成三维外观
+
+给运行 MCP 的进程配置 `MESHY_API_KEY` 后，Agent 可以把物体的描述交给 `start_object_model`，用 `get_object_model` 查询任务。成功后返回 `modelId`，运行实验时把它放入 `baseline`。CLI 可用 `model-start --prompt` 和 `model-get TASK_ID` 执行同一操作。
+
+生成的 GLB 会贴合碰撞体的尺寸，用于回放外观。质量、碰撞和尖端判定取实验设置中的物理碰撞体。能够执行的动作由引擎已有的任务和控制策略决定。[Meshy 文本生成三维模型 API](https://docs.meshy.ai/en/api/text-to-3d)
 
 后续扩展以现有场景规格和策略为入口。新增作物可从碰撞体和尺寸配置开始。新增机械臂可先使用引擎的 URDF 导入入口，再接入相应的抓放策略。新增任务应同时提供动作策略和成功判据。

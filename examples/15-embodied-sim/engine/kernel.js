@@ -423,14 +423,14 @@ export function fourAxisPickAction(arm, obs, { ee, obj, goal }, step) {
     : [...ik(arm, above(goalPosition, 0.22)), 0];
 }
 
-export function naxisPickAction(spec, na, obs, { ee, obj, goal }, step) {
+export function naxisPickAction(spec, na, obs, { ee, obj, goal }, step, gapAxis = [0, 0, 1]) {
   const endEffector = [obs[ee], obs[ee + 1], obs[ee + 2]];
   const world = (offset) => endEffector.map((v, axis) => v + obs[offset + axis]);
   const objectPosition = world(obj);
   const goalPosition = world(goal);
   const phaseIndex = policyTick(na.phases, step);
   const phase = na.phases[phaseIndex];
-  let raw = phase ? phase.target(objectPosition, goalPosition) : above(goalPosition, 0.22);
+  let raw = phase ? phase.target(objectPosition, goalPosition, step) : above(goalPosition, 0.22);
 
   // 夹持阶段固定目标，避免夹爪随物体的轻微偏移反复追踪。
   if (phase?.pin) {
@@ -445,7 +445,7 @@ export function naxisPickAction(spec, na, obs, { ee, obj, goal }, step) {
   }
   const target = step > hoverEnd ? raw.map((v, i) => v + na.sag[i]) : raw;
   if (step > 0 && na.lastErr > 0.02) na.q = obs.slice(0, spec.robot.joints.length);
-  na.lastErr = dlsSolve(spec, na, target, [0, -1, 0], [0, 0, 1]);
+  na.lastErr = dlsSolve(spec, na, target, [0, -1, 0], gapAxis);
   const limited = na.q.map((v, i) => na.prevCmd
     ? na.prevCmd[i] + Math.min(Math.max(v - na.prevCmd[i], -0.028), 0.028)
     : v);
@@ -574,7 +574,7 @@ function propGeom(shape) {
 
 // ── 从 spec 搭建 three.js 场景（fixtures / 机器人 / 夹爪 / 方块 / 目标圈）
 // ——形状全部来自 spec（改 JSON 换方块形状，浏览器页直接可见）。
-function buildSceneFromSpec(scene) {
+function buildSceneFromSpec(scene, cornSlot = false) {
   // 旧节点退役
   for (const key of ["world", "robot", "goal", "beam"]) {
     const old = K.visuals[key];
@@ -605,6 +605,8 @@ function buildSceneFromSpec(scene) {
       floorD.repeat.set(4, 3);
       floorD.colorSpace = THREE.SRGBColorSpace;
       m = new THREE.MeshStandardMaterial({ map: floorD, roughness: 0.92, envMapIntensity: 1.1 });
+    } else if (cornSlot && /^(basket-|slot-)/.test(fx.name)) {
+      m = mat(fx.name === "basket-rim" ? 0xb9753c : fx.name.startsWith("slot-") ? 0x437b88 : 0x74503a);
     } else {
       const woodD = texLoader.load("vendor/assets/wood_orig_diff.jpg?v=6");
       const woodR = texLoader.load("vendor/assets/wood_rough.jpg?v=2");
@@ -633,6 +635,7 @@ function buildSceneFromSpec(scene) {
   scene.add(beam);
   K.visuals.goal = goal;
   K.visuals.beam = beam;
+  goal.visible = beam.visible = !cornSlot;
 
   // 机器人：每个 link 一个 Group（位姿由 poses() 每拍写回），
   // 碰撞体形状映射为 mesh（Box→盒；细长盒→胶囊观感；Capsule→胶囊）。
@@ -694,10 +697,17 @@ function buildSceneFromSpec(scene) {
   // （propGeom 读内部标签），不再一律默认方块。
   for (const prop of K.spec.scene.props) {
     const g = propGeom(prop.shape);
-    const geo = g.kind === "cylinder" ? new THREE.CylinderGeometry(g.radius, g.radius, g.height, 32)
+    const geo = cornSlot
+      ? new THREE.CylinderGeometry(0.010, prop.shape.half[2], 2 * prop.shape.half[0], 24).rotateZ(-Math.PI / 2)
+      : g.kind === "cylinder" ? new THREE.CylinderGeometry(g.radius, g.radius, g.height, 32)
       : g.kind === "sphere" ? new THREE.SphereGeometry(g.radius, 24, 16)
       : new THREE.BoxGeometry(g.size[0], g.size[1], g.size[2]);
     const mesh = new THREE.Mesh(geo, mat(0xffd479));
+    if (cornSlot) {
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.009, 16, 12), mat(0xffa742));
+      tip.position.x = prop.shape.half[0] - 0.004;
+      mesh.add(tip);
+    }
     mesh.castShadow = mesh.receiveShadow = true;
     if (prop === K.spec.scene.props[0]) K.visuals.cube = mesh;
     (K.visuals.props ||= []).push(mesh); // 与 spec.scene.props 同序（全量渲染）
@@ -707,7 +717,7 @@ function buildSceneFromSpec(scene) {
   scene.add(robot);
 }
 
-export async function boot(viewport, replay = null) {
+export async function boot(viewport, replay = null, replayFrame = null) {
   const stage = (t) => { const el = document.getElementById("load"); if (el) el.firstElementChild.textContent = "启动: " + t; };
   stage("renderer");
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -722,7 +732,9 @@ export async function boot(viewport, replay = null) {
   const pipCam = new THREE.OrthographicCamera(
     -0.46, 0.46, 0.46, -0.46, 0.01, 5);
   pipCam.position.set(0.32, 3.0, 0);
-  pipCam.up.set(0, 0, -1); // +x→右, +z→下（与 camera.rs 的 x→右/z→下映射一致）
+  const cornSlot = replay?.summary.task === "corn_slot";
+  if (cornSlot) pipCam.up.set(1, 0, 0); // 俯视图左侧对应世界坐标 −Z。
+  else pipCam.up.set(0, 0, -1);
   pipCam.lookAt(0.32, 0, 0);
   const pipSize = 160;
 
@@ -810,9 +822,13 @@ export async function boot(viewport, replay = null) {
   const taskEl = document.getElementById("task-desc");
   if (specUrl && taskEl) taskEl.innerHTML = taskDescHtml(K.spec);
   K.policySource = new URLSearchParams(location.search).get("policy") === "wasm" ? "wasm" : "js";
-  buildSceneFromSpec(scene);
+  buildSceneFromSpec(scene, cornSlot);
   stage("world");
   try { envReset(replay?.summary.seed ?? 1000); } catch (e) { stage("ERR: " + (e && e.message ? e.message : e)); throw e; }
+  if (replay?.summary.modelId) {
+    stage("加载物体的 GLB 外观");
+    await attachReplayModel(replay.summary.modelId, cornSlot);
+  }
   document.getElementById("load").remove();
 
   // 相机拖拽
@@ -1149,14 +1165,9 @@ export async function boot(viewport, replay = null) {
     syncVisuals();
   }
 
-  let replayStartedAt = performance.now();
-  if (replay) document.getElementById("btn-replay").onclick = () => { replayStartedAt = performance.now(); };
   function loop() {
-    if (replay) {
-      const elapsed = (performance.now() - replayStartedAt) / 1000;
-      const index = Math.min(Math.floor(elapsed / replay.frameSeconds), replay.frames.length - 1);
-      syncVisuals(replay.frames[index]);
-    } else advanceLive();
+    if (replay) syncVisuals(replayFrame());
+    else advanceLive();
     // 目标圈呼吸脉冲 + EE 拖尾滚动
     const pulse = 1 + 0.06 * Math.sin(performance.now() * 0.003);
     K.visuals.goal.scale.set(pulse, pulse, 1);
@@ -1240,6 +1251,38 @@ export async function boot(viewport, replay = null) {
       get state() { return K; },
     },
   };
+}
+
+async function attachReplayModel(id, cornSlot) {
+  if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("GLB 模型编号无效");
+  const { GLTFLoader } = await import("/lab-loader/loaders/GLTFLoader.js");
+  const modelUrl = new URL(`/out/embodied-lab-models/${id}.glb`, location.origin).href;
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier((uri) => {
+    if (uri === modelUrl || uri.startsWith("blob:") || uri.startsWith("data:")) return uri;
+    throw new Error("请使用内嵌资源的 GLB 模型。");
+  });
+  const { scene: mesh } = await new GLTFLoader(manager).loadAsync(modelUrl);
+  const visual = new THREE.Group();
+  visual.add(mesh);
+  if (cornSlot) {
+    const extents = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+    const axis = extents.x >= extents.y && extents.x >= extents.z ? [1, 0, 0]
+      : extents.y >= extents.z ? [0, 1, 0] : [0, 0, 1];
+    visual.quaternion.setFromUnitVectors(new THREE.Vector3(...axis), new THREE.Vector3(1, 0, 0));
+  }
+  const bounds = new THREE.Box3().setFromObject(visual);
+  const size = bounds.getSize(new THREE.Vector3());
+  if (bounds.isEmpty() || Math.min(size.x, size.y, size.z) <= 0) throw new Error("GLB 缺少三维模型几何。");
+  const shape = propGeom(K.spec.scene.props[0].shape);
+  const limits = shape.kind === "sphere" ? [2 * shape.radius, 2 * shape.radius, 2 * shape.radius]
+    : shape.kind === "cylinder" ? [2 * shape.radius, shape.height, 2 * shape.radius] : shape.size;
+  visual.position.copy(bounds.getCenter(new THREE.Vector3())).negate();
+  const mount = new THREE.Group();
+  mount.add(visual);
+  mount.scale.setScalar(Math.min(...limits.map((extent, i) => extent / size.getComponent(i))));
+  K.visuals.cube.material.visible = false;
+  K.visuals.cube.add(mount);
 }
 
 // ── 测试导出（node:test + wasm 烟测）──────────────────────────
